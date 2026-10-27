@@ -1,0 +1,38 @@
+# Local environment and tools
+.venv/
+venv/
+.idea/
+.vscode/
+.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.env
+.env.*
+!.env.example
+
+# Generated artifacts
+artifacts/
+outputs/
+catboost_info/
+*.log
+
+# Local emulator image; CSV data and source specifications are versioned
+dataset/ndtp-telemetry-emulator/
+dataset/*.tar
+
+# Python packaging
+*.egg-info/
+build/
+dist/
+
+# Generated code documentation
+docs/sphinx/_build/
+
+# Frontend dependencies and local Vite cache
+node_modules/
+.vite/

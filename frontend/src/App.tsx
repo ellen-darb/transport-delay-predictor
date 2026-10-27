@@ -1,0 +1,219 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { api, type ReplayAction } from "./api";
+import { Header } from "./components/Header";
+import { DemoPanel } from "./components/DemoPanel";
+import { MapView } from "./components/MapView";
+import { MobileTabs, type MobileTab } from "./components/MobileTabs";
+import { Queue, type Filter } from "./components/Queue";
+import { ReplayControls } from "./components/ReplayControls";
+import { SystemPanel } from "./components/SystemPanel";
+import { VehicleCard } from "./components/VehicleCard";
+import { sourceMs } from "./replayTime";
+import { usePolling } from "./usePolling";
+import { useHistoryView } from "./useHistoryView";
+import type { AuthState, DemoSource, DemoState, Snapshot, Status, VehicleDetail } from "./types";
+
+export default function App({ user, onLogout }: { user: AuthState; onLogout: () => void }) {
+  const [filter, setFilter] = useState<Filter>("attention");
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState<string | null>(null);
+  const [mapFocus, setMapFocus] = useState<{ trId: string; sequence: number } | null>(null);
+  const [showSystem, setShowSystem] = useState(false);
+  const [mobileTab, setMobileTab] = useState<MobileTab>("queue");
+  const [commandPending, setCommandPending] = useState(false);
+  const [pollKey, setPollKey] = useState(0);
+  const [commandError, setCommandError] = useState<string | null>(null);
+  const [demo, setDemo] = useState<DemoState | null>(null);
+  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [lastStatus, setLastStatus] = useState<Status | null>(null);
+  const historyView = useHistoryView(snapshot);
+
+  const demoPoll = usePolling((signal) => api.demo(signal), 5000, !commandPending, String(pollKey));
+  const snapshotPoll = usePolling((signal) => api.snapshot(signal), 1000, !commandPending, String(pollKey));
+  const statusPoll = usePolling((signal) => api.status(signal), 4000, !commandPending, String(pollKey));
+  const qualityPoll = usePolling((signal) => api.quality(signal), 10000, showSystem && !commandPending, String(pollKey));
+  const detailPoll = usePolling<VehicleDetail>(
+    (signal) => api.vehicle(selected as string, signal),
+    2000,
+    selected !== null && !commandPending && !historyView.active,
+    `${snapshot?.run_id ?? ""}:${selected ?? ""}`,
+  );
+
+  useEffect(() => { if (statusPoll.data) setLastStatus(statusPoll.data); }, [statusPoll.data]);
+  useEffect(() => { if (demoPoll.data) setDemo(demoPoll.data); }, [demoPoll.data]);
+  const navigationStatus = statusPoll.data ?? lastStatus;
+
+  // A stale answer must never overwrite a newer snapshot revision.
+  useEffect(() => {
+    const fresh = snapshotPoll.data;
+    if (!fresh) return;
+    setSnapshot((previous) => !previous || fresh.run_id !== previous.run_id || fresh.revision >= previous.revision
+      ? fresh : previous);
+  }, [snapshotPoll.data]);
+
+  useEffect(() => { setSelected(null); }, [snapshot?.run_id]);
+
+  const sourceClock = snapshot?.clock;
+  const sourceNow = sourceMs(sourceClock?.source_time);
+  const noReplayData = snapshot?.mode === "replay" && Number.isFinite(sourceNow) && (
+    sourceNow < sourceMs(sourceClock?.source_window?.first) ||
+    sourceNow > sourceMs(sourceClock?.source_window?.last)
+  );
+  const viewedSnapshot = historyView.active ? historyView.frame?.snapshot ?? null : snapshot;
+  const displaySnapshot = useMemo(() => !noReplayData && viewedSnapshot ? viewedSnapshot : snapshot ? {
+    ...snapshot, vehicles: [], alerts: [],
+    summary: { vehicles: 0, with_prediction: 0, attention: 0, red: 0,
+      no_prediction: 0, stale: 0, unmapped: 0, alerts_active: 0 },
+  } : null, [viewedSnapshot, snapshot, noReplayData]);
+
+  const detail = useMemo(() => {
+    if (historyView.active) return selected ? historyView.frame?.details[selected] ?? null : null;
+    const current = displaySnapshot?.vehicles.find((item) => item.tr_id === selected);
+    if (!current || !displaySnapshot) return null;
+    const loaded = detailPoll.data;
+    const usable = loaded?.tr_id === selected && loaded?.run_id === displaySnapshot.run_id && !detailPoll.error;
+    if (usable) {
+      return { ...loaded, ...(loaded.revision > displaySnapshot.revision ? {} : current) };
+    }
+    return { ...current, run_id: displaySnapshot.run_id, revision: displaySnapshot.revision,
+      track: [], plan: [], prediction_history: [] } as VehicleDetail;
+  }, [detailPoll.data, detailPoll.error, displaySnapshot, selected, historyView.active, historyView.frame]);
+
+  // On a phone a chosen vehicle opens its card; wider layouts show every panel anyway.
+  const openCard = useCallback(() => {
+    setShowSystem(false);
+    setMobileTab("card");
+  }, []);
+
+  const acknowledge = useCallback(async (alertId: string) => {
+    if (historyView.active) return;
+    try {
+      await api.acknowledge(alertId);
+      setCommandError(null);
+    } catch (error) {
+      setCommandError(error instanceof Error ? error.message : String(error));
+    }
+  }, [historyView.active]);
+
+  const command = useCallback(
+    async (action: ReplayAction, speed?: number, startAt?: string) => {
+      setCommandPending(true);
+      try {
+        await api.replay(action, speed, startAt);
+        if (action === "seek" || action === "reset") setSelected(null);
+        setPollKey((value) => value + 1);
+        setCommandError(null);
+      } catch (error) {
+        setCommandError(error instanceof Error ? error.message : String(error));
+      } finally {
+        setCommandPending(false);
+      }
+    },
+    [],
+  );
+
+  const switchSource = useCallback(async (source: DemoSource, speed: number) => {
+    setCommandPending(true);
+    try {
+      const result = await api.source(source, speed);
+      setDemo(result);
+      setSelected(null);
+      setMapFocus(null);
+      setSnapshot(null);
+      setLastStatus(null);
+      setCommandError(null);
+    } catch (error) {
+      setCommandError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPollKey((value) => value + 1);
+      setCommandPending(false);
+    }
+  }, []);
+
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const ageMs = snapshotPoll.updatedAt ? Math.max(0, now - snapshotPoll.updatedAt) : null;
+  const connectionLost = snapshotPoll.error !== null || (ageMs !== null && ageMs > 6000);
+  const clock = snapshot?.clock;
+
+  return (
+    <div className="app">
+      <Header snapshot={displaySnapshot} status={statusPoll.data} ageMs={ageMs}
+        user={user} onLogout={onLogout}
+        historical={historyView.active}
+        error={commandError ?? historyView.error ?? (noReplayData ? "Нет данных в выбранный момент" : null)} />
+      {connectionLost ? (
+        <div className="banner">
+          Связь с Backend потеряна: {snapshotPoll.error ?? "состояние давно не обновлялось"}. Показано последнее полученное состояние
+          {ageMs ? ` (${Math.round(ageMs / 1000)} с назад)` : ""}.
+        </div>
+      ) : null}
+      {statusPoll.data && !statusPoll.data.ml.ready ? (
+        <div className="banner warn">
+          ML-сервис недоступен: новые прогнозы не выдаются, показаны прошлые значения с их
+          возрастом. {statusPoll.data.ml.last_error ?? ""}
+        </div>
+      ) : null}
+      {clock?.plan_shift_note ? <div className="banner warn">{clock.plan_shift_note}</div> : null}
+      {snapshot?.fixture ? (
+        <div className="banner warn">Демонстрационные фикстуры, не живой поток.</div>
+      ) : null}
+      {selected && detailPoll.error && !historyView.active ? <div className="banner warn">
+        История ТС недоступна: {detailPoll.error}. Основные данные обновляются из общей очереди.
+      </div> : null}
+      <div className="body" data-mobile-tab={mobileTab === "system" ? "card" : mobileTab}>
+        <Queue
+          snapshot={displaySnapshot}
+          filter={filter}
+          search={search}
+          selected={selected}
+          onFilter={setFilter}
+          onSearch={setSearch}
+          onSelect={(trId) => { setSelected(trId); openCard(); }}
+          onFocus={(trId) => {
+            setSelected(trId);
+            setMobileTab("map");
+            setMapFocus((previous) => ({ trId, sequence: (previous?.sequence ?? 0) + 1 }));
+          }}
+        />
+        <MapView snapshot={displaySnapshot} detail={detail} selected={selected} onSelect={setSelected} focusRequest={mapFocus} />
+        {showSystem ? (
+          <SystemPanel status={statusPoll.data} quality={qualityPoll.data} />
+        ) : (
+          <VehicleCard
+            detail={detail}
+            alerts={displaySnapshot?.alerts ?? []}
+            policy={snapshot?.risk_policy ?? null}
+            onAcknowledge={acknowledge}
+            readOnly={historyView.active}
+            canAct={user.can_act}
+          />
+        )}
+      </div>
+      <MobileTabs tab={mobileTab} attention={displaySnapshot?.summary.attention ?? 0} selected={selected}
+        onTab={(tab) => {
+          setMobileTab(tab);
+          if (tab === "system") setShowSystem(true);
+          if (tab === "card") setShowSystem(false);
+        }} />
+      <ReplayControls
+        status={navigationStatus ? { ...navigationStatus,
+          clock: snapshot?.run_id === navigationStatus.run_id ? snapshot.clock : navigationStatus.clock,
+          history: snapshot?.run_id === navigationStatus.run_id ? snapshot.history : navigationStatus.history,
+        } : null}
+        historyView={historyView}
+        pending={commandPending}
+        onCommand={command}
+        showSystem={showSystem}
+        onToggleSystem={() => setShowSystem((value) => {
+          setMobileTab(value ? "card" : "system");
+          return !value;
+        })}
+        sourceControl={<DemoPanel state={demo} pending={commandPending} error={demoPoll.error} onSwitch={switchSource} />}
+      />
+    </div>
+  );
+}

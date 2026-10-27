@@ -1,0 +1,96 @@
+{
+  "request": {
+    "action": "seek",
+    "start_at": "2026-01-06 11:30:15"
+  },
+  "response": {
+    "clock": {
+      "time_basis": "dataset_naive_ns",
+      "mode": "driven",
+      "source_time": "2026-01-06 11:30:15",
+      "wall_time": "2026-09-26T18:00:00.000Z",
+      "speed": 60.0,
+      "paused": true,
+      "plan_shift_s": 0.0,
+      "source_window": {
+        "first": "2026-01-06 00:00:02",
+        "last": "2026-01-06 23:59:59"
+      },
+      "source_progress": 0.4527758647076829,
+      "events_delivered": 47335,
+      "events_total": 104544
+    },
+    "run_id": "run-fixture-after-seek"
+  },
+  "ui_navigation": {
+    "default_range": {
+      "first": "2026-01-06 00:00:02",
+      "last": "2026-01-06 23:59:59"
+    },
+    "selected_range": {
+      "first": "2026-01-06 11:00:00",
+      "last": "2026-01-06 12:00:00"
+    },
+    "note": "Настройка диапазона только в UI, не поле ответа API; после seek сохраняется.",
+    "presentation": "ruler",
+    "quick_intervals_s": [
+      900,
+      3600,
+      21600
+    ],
+    "playhead_at": "2026-01-06 11:30:15",
+    "unrestricted": true,
+    "selection_width_fraction": 0.8,
+    "playhead_drag": {
+      "hit_target": "red_line_and_head",
+      "preview": "continuous_local",
+      "commit": "one_seek_on_pointerup_rounded_to_second",
+      "preserves_range": true,
+      "cancel": "no_request"
+    },
+    "background_drag": "move_selected_range"
+  },
+  "outside_data_example": {
+    "request": {
+      "action": "seek",
+      "start_at": "2026-01-08 12:00:15"
+    },
+    "expected": {
+      "source_time": "2026-01-08 12:00:15",
+      "paused": true,
+      "vehicles": [],
+      "alerts": []
+    },
+    "ui": {
+      "playhead_at": "2026-01-08 12:00:15",
+      "header_error": "Нет данных в выбранный момент",
+      "map_empty": true
+    }
+  },
+  "ui_map": {
+    "queue_double_click": "fit_selected_plan_segment_and_position",
+    "hover_tooltip": "preserved_during_polling_until_pointer_leaves_or_object_removed",
+    "vehicle_shape": "heading_arrow",
+    "unknown_heading_shape": "diamond",
+    "heading_field": "position.heading_deg",
+    "heading_basis": "north_clockwise_degrees",
+    "provider": "yandex_maps_js_api_2_1",
+    "vehicle_renderer": "persistent_placemark_svg",
+    "suppress_map_open_block": true,
+    "terms_link_visible": false,
+    "copyright_text_visible": false,
+    "logo_visible": false,
+    "legend_vehicle_colour_alignment": "center",
+    "legend_bottom_px": 10,
+    "legend_left_px": 10
+  },
+  "ui_demo": {
+    "placement": "time_toolbar_before_system",
+    "presentation": "source_button_with_popover",
+    "close": [
+      "escape",
+      "outside_pointer"
+    ],
+    "switch_clears_selection": true
+  }
+}
